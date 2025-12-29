@@ -41,7 +41,7 @@ Update the Windows side to the latest commit on the branch:
 weaseltree sync
 ```
 
-Run this after making commits on the WSL side to update the Windows worktree.
+Run this after making commits on the WSL side to update the Windows worktree. Uses `git.exe` so Windows-side git settings (like `core.autocrlf`) are honored.
 
 ### Up
 
