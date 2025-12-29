@@ -90,11 +90,14 @@ weaseltree
 
 ## Config
 
-Stored at `%USERPROFILE%\.weaseltree`:
+Stored at `%USERPROFILE%\.weaseltree.json`:
 
-```ini
-[r/myproject]
-branch = feature-x
-windows_path = /mnt/c/r/myproject
-wsl_path = /home/user/r/myproject
+```json
+{
+  "r/myproject": {
+    "branch": "feature-x",
+    "windows_path": "/mnt/c/r/myproject",
+    "wsl_path": "/home/user/r/myproject"
+  }
+}
 ```

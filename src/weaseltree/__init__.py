@@ -1,5 +1,5 @@
 import argparse
-import configparser
+import json
 import os
 import re
 import shutil
@@ -38,8 +38,8 @@ def get_windows_home() -> Path:
 
 
 def get_weaseltree_config() -> Path:
-    """Get the path to the .weaseltree config file on Windows side."""
-    return get_windows_home() / ".weaseltree"
+    """Get the path to the .weaseltree.json config file on Windows side."""
+    return get_windows_home() / ".weaseltree.json"
 
 
 def extract_relative_path(path: str) -> str | None:
@@ -73,51 +73,45 @@ def get_current_branch() -> str | None:
     return None
 
 
-def save_worktree_config(relative_path: str, branch: str, windows_path: str, wsl_path: str):
-    """Save worktree config to Windows ~/.weaseltree config file."""
+def load_config() -> dict:
+    """Load the full config from JSON file."""
     config_path = get_weaseltree_config()
-    config = configparser.ConfigParser()
     if config_path.exists():
-        config.read(config_path)
-    # Use relative_path as section name
-    if relative_path not in config:
-        config[relative_path] = {}
-    config[relative_path]["branch"] = branch
-    config[relative_path]["windows_path"] = windows_path
-    config[relative_path]["wsl_path"] = wsl_path
+        with open(config_path) as f:
+            return json.load(f)
+    return {}
+
+
+def save_config(config: dict):
+    """Save the full config to JSON file."""
+    config_path = get_weaseltree_config()
     with open(config_path, "w") as f:
-        config.write(f)
+        json.dump(config, f, indent=2)
+
+
+def save_worktree_config(relative_path: str, branch: str, windows_path: str, wsl_path: str):
+    """Save worktree config to Windows ~/.weaseltree.json config file."""
+    config = load_config()
+    config[relative_path] = {
+        "branch": branch,
+        "windows_path": windows_path,
+        "wsl_path": wsl_path,
+    }
+    save_config(config)
 
 
 def load_worktree_config(relative_path: str) -> dict | None:
-    """Load worktree config from Windows ~/.weaseltree config file."""
-    config_path = get_weaseltree_config()
-    config = configparser.ConfigParser()
-    if config_path.exists():
-        config.read(config_path)
-        if relative_path in config:
-            return {
-                "branch": config[relative_path].get("branch"),
-                "windows_path": config[relative_path].get("windows_path"),
-                "wsl_path": config[relative_path].get("wsl_path"),
-            }
-    return None
+    """Load worktree config from Windows ~/.weaseltree.json config file."""
+    config = load_config()
+    return config.get(relative_path)
 
 
 def find_config_by_wsl_path(wsl_path: str) -> tuple[str, dict] | None:
     """Find worktree config by WSL path. Returns (relative_path, config) or None."""
-    config_path = get_weaseltree_config()
-    config = configparser.ConfigParser()
-    if config_path.exists():
-        config.read(config_path)
-        for section in config.sections():
-            stored_wsl_path = config[section].get("wsl_path")
-            if stored_wsl_path and stored_wsl_path == wsl_path:
-                return (section, {
-                    "branch": config[section].get("branch"),
-                    "windows_path": config[section].get("windows_path"),
-                    "wsl_path": stored_wsl_path,
-                })
+    config = load_config()
+    for key, entry in config.items():
+        if isinstance(entry, dict) and entry.get("wsl_path") == wsl_path:
+            return (key, entry)
     return None
 
 
