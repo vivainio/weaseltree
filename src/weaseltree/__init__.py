@@ -213,12 +213,13 @@ def clone_command(args):
         wsl_target.parent.mkdir(parents=True, exist_ok=True)
 
         # Create the worktree on the same branch
+        print(f"Creating worktree at {wsl_target}...")
         try:
             subprocess.run(
                 ["git", "worktree", "add", str(wsl_target), current_branch],
                 check=True,
             )
-            print(f"Created worktree at: {wsl_target} on branch '{current_branch}'")
+            print(f"Created worktree on branch '{current_branch}'")
         except subprocess.CalledProcessError as e:
             print(f"Error creating worktree: {e}", file=sys.stderr)
             sys.exit(1)
