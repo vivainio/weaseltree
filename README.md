@@ -6,6 +6,8 @@ Sync git worktrees between fast WSL filesystem and slow Windows filesystem.
 
 All filesystem operations from WSL on Windows drives (`/mnt/c/...`) are slow due to the 9P protocol translation layer. This affects everything: builds, git operations, file watchers, IDE indexing.
 
+AI coding tools like Claude Code also benefit significantly from fast filesystem access - file searches, code analysis, and edits are all much faster on native WSL paths.
+
 This tool creates a git worktree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for IDE access.
 
 ## Install
