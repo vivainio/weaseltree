@@ -387,8 +387,34 @@ def up_command(args):
         # Create parent directories if needed
         dst.parent.mkdir(parents=True, exist_ok=True)
 
-        # Copy file
-        shutil.copy2(src, dst)
+        # Copy file, preserving target line endings if it exists
+        try:
+            src_content = src.read_bytes()
+            # Check if binary (contains null bytes)
+            if b'\x00' in src_content:
+                dst.write_bytes(src_content)
+            else:
+                # Text file - check target line endings
+                use_crlf = False
+                if dst.exists():
+                    try:
+                        with open(dst, 'rb') as f:
+                            chunk = f.read(8192)
+                            if b'\r\n' in chunk:
+                                use_crlf = True
+                    except Exception:
+                        pass
+
+                if use_crlf:
+                    # Normalize to LF then convert to CRLF
+                    src_content = src_content.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+                    src_content = src_content.replace(b'\n', b'\r\n')
+
+                dst.write_bytes(src_content)
+        except Exception:
+            # Fallback to simple copy
+            shutil.copy2(src, dst)
+
         print(f"  Copied: {filepath}")
         copied += 1
 
