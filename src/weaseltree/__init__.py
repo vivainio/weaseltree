@@ -245,6 +245,22 @@ def sync_command(args):
             print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
             sys.exit(1)
 
+        # Check if WSL worktree branch has changed
+        wsl_path = config.get("wsl_path")
+        if wsl_path and Path(wsl_path).exists():
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=wsl_path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                current_branch = result.stdout.strip()
+                if current_branch != "HEAD" and current_branch != config["branch"]:
+                    print(f"Branch changed: {config['branch']} -> {current_branch}")
+                    config["branch"] = current_branch
+                    save_worktree_config(relative_path, current_branch, config["windows_path"], wsl_path)
+
         # Sync to latest version of the branch using git.exe for proper Windows line endings
         try:
             subprocess.run(["git.exe", "checkout", "--force", "--detach", config["branch"]], check=True)
@@ -257,7 +273,7 @@ def sync_command(args):
     # Try WSL side (lookup by wsl_path)
     result = find_config_by_wsl_path(cwd)
     if result is not None:
-        _, config = result
+        relative_path, config = result
         windows_path = config["windows_path"]
 
         # Verify Windows side is in detached HEAD before using --force
@@ -270,6 +286,13 @@ def sync_command(args):
         if check.returncode == 0 and check.stdout.strip() != "HEAD":
             print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
             sys.exit(1)
+
+        # Check if current branch has changed
+        current_branch = get_current_branch()
+        if current_branch and current_branch != config["branch"]:
+            print(f"Branch changed: {config['branch']} -> {current_branch}")
+            config["branch"] = current_branch
+            save_worktree_config(relative_path, current_branch, windows_path, cwd)
 
         # Sync Windows side using git.exe for proper Windows line endings
         try:

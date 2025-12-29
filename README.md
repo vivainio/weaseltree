@@ -71,6 +71,29 @@ weaseltree push
 
 Uses `git.exe` when run from WSL, so Windows-side git remotes and credentials are used.
 
+### Pull
+
+Fetch from origin and update the branch:
+
+```bash
+# From either side
+weaseltree pull
+```
+
+Uses `git.exe` for fetch (Windows credentials), then fast-forward merges into the WSL worktree.
+
+### Switching Branches
+
+To switch to a different branch:
+
+```bash
+# In the WSL worktree
+git checkout other-branch
+weaseltree sync
+```
+
+The `sync` command automatically detects when the WSL branch has changed and updates the config accordingly.
+
 ### Status
 
 Run without arguments to see available commands and current repository status:
