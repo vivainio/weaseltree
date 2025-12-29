@@ -1,10 +1,12 @@
 # weaseltree
 
-WSL git worktree helper for working with repositories across Windows and WSL.
+Sync git worktrees between fast WSL filesystem and slow Windows filesystem.
 
 ## Problem
 
-Git operations on Windows filesystem from WSL are slow. This tool creates a git worktree on the native WSL filesystem, mirroring your Windows repository path structure.
+All filesystem operations from WSL on Windows drives (`/mnt/c/...`) are slow due to the 9P protocol translation layer. This affects everything: builds, git operations, file watchers, IDE indexing.
+
+This tool creates a git worktree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for IDE access.
 
 ## Install
 
@@ -71,9 +73,10 @@ weaseltree
 
 1. Start with a repo on Windows: `/mnt/c/r/myproject` on branch `feature-x`
 2. Run `weaseltree clone` to create `~/r/myproject` worktree
-3. Work in `~/r/myproject` (fast git operations)
-4. Run `weaseltree sync` to update Windows side
-5. Use Windows IDE pointing at `C:\r\myproject` (sees latest changes)
+3. Work in `~/r/myproject` (fast filesystem - builds, git, everything)
+4. Run `weaseltree up` to copy uncommitted changes to Windows (for IDE preview)
+5. Run `weaseltree sync` after commits to update Windows side
+6. Use Windows IDE pointing at `C:\r\myproject` (sees synced changes)
 
 ## Config
 
