@@ -58,6 +58,21 @@ def extract_relative_path(path: str) -> str | None:
     return None
 
 
+def extract_relative_path_from_wsl_home(path: str) -> str | None:
+    """Extract relative path from WSL home directory.
+
+    ~/r/foo/bar -> r/foo/bar
+    Returns the path only if it's registered in .weaseltree config.
+    """
+    home = str(Path.home())
+    if path.startswith(home + "/"):
+        relative = path[len(home) + 1:]
+        # Check if this relative path is in the config
+        if load_worktree_config(relative) is not None:
+            return relative
+    return None
+
+
 def get_current_branch() -> str | None:
     """Get the current git branch name."""
     result = subprocess.run(
@@ -72,27 +87,32 @@ def get_current_branch() -> str | None:
     return None
 
 
-def save_branch_config(relative_path: str, branch: str):
-    """Save branch mapping to Windows ~/.weaseltree config file."""
+def save_worktree_config(relative_path: str, branch: str, windows_path: str):
+    """Save worktree config to Windows ~/.weaseltree config file."""
     config_path = get_weaseltree_config()
     config = configparser.ConfigParser()
     if config_path.exists():
         config.read(config_path)
-    if "branches" not in config:
-        config["branches"] = {}
-    config["branches"][relative_path] = branch
+    # Use relative_path as section name
+    if relative_path not in config:
+        config[relative_path] = {}
+    config[relative_path]["branch"] = branch
+    config[relative_path]["windows_path"] = windows_path
     with open(config_path, "w") as f:
         config.write(f)
 
 
-def load_branch_config(relative_path: str) -> str | None:
-    """Load branch mapping from Windows ~/.weaseltree config file."""
+def load_worktree_config(relative_path: str) -> dict | None:
+    """Load worktree config from Windows ~/.weaseltree config file."""
     config_path = get_weaseltree_config()
     config = configparser.ConfigParser()
     if config_path.exists():
         config.read(config_path)
-        if "branches" in config and relative_path in config["branches"]:
-            return config["branches"][relative_path]
+        if relative_path in config:
+            return {
+                "branch": config[relative_path].get("branch"),
+                "windows_path": config[relative_path].get("windows_path"),
+            }
     return None
 
 
@@ -112,64 +132,123 @@ def clone_command(args):
         sys.exit(1)
 
     if wsl_target.exists():
-        print(f"Target already exists: {wsl_target}")
-        sys.exit(0)
+        # Check if it's already a git worktree
+        if not os.path.exists(os.path.join(wsl_target, ".git")):
+            print(f"Error: Target exists but is not a git worktree: {wsl_target}", file=sys.stderr)
+            sys.exit(1)
 
-    # Get current branch before any changes
-    current_branch = get_current_branch()
-    if current_branch is None:
-        print("Error: Not on a branch (detached HEAD?)", file=sys.stderr)
-        sys.exit(1)
+        # Get branch from Windows side
+        win_branch = get_current_branch()
+        if win_branch is None:
+            # Windows is detached, get branch from WSL worktree
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(wsl_target),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0 or result.stdout.strip() == "HEAD":
+                print(f"Error: Could not determine branch from WSL worktree", file=sys.stderr)
+                sys.exit(1)
+            current_branch = result.stdout.strip()
+            print(f"WSL worktree already exists: {wsl_target}")
+        else:
+            # Windows is on a branch - switch WSL worktree to it
+            current_branch = win_branch
+            try:
+                subprocess.run(
+                    ["git", "checkout", current_branch],
+                    cwd=str(wsl_target),
+                    check=True,
+                )
+                print(f"Switched WSL worktree to branch '{current_branch}'")
+            except subprocess.CalledProcessError as e:
+                print(f"Error switching WSL worktree: {e}", file=sys.stderr)
+                sys.exit(1)
 
-    # Detach HEAD on Windows side first (to free up the branch)
-    try:
-        subprocess.run(["git", "checkout", "--detach"], check=True)
-        print(f"Detached HEAD on Windows side")
-    except subprocess.CalledProcessError as e:
-        print(f"Error detaching HEAD: {e}", file=sys.stderr)
-        sys.exit(1)
+            # Detach HEAD on Windows side
+            try:
+                subprocess.run(["git", "checkout", "--detach"], check=True)
+                print(f"Detached HEAD on Windows side")
+            except subprocess.CalledProcessError as e:
+                print(f"Error detaching HEAD: {e}", file=sys.stderr)
+                sys.exit(1)
+    else:
+        # Get current branch before any changes
+        current_branch = get_current_branch()
+        if current_branch is None:
+            print("Error: Not on a branch (detached HEAD?)", file=sys.stderr)
+            sys.exit(1)
 
-    # Create parent directories for target
-    wsl_target.parent.mkdir(parents=True, exist_ok=True)
+        # Detach HEAD on Windows side (to free up the branch)
+        try:
+            subprocess.run(["git", "checkout", "--detach"], check=True)
+            print(f"Detached HEAD on Windows side")
+        except subprocess.CalledProcessError as e:
+            print(f"Error detaching HEAD: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    # Create the worktree on the same branch
-    try:
-        subprocess.run(
-            ["git", "worktree", "add", str(wsl_target), current_branch],
-            check=True,
-        )
-        print(f"Created worktree at: {wsl_target} on branch '{current_branch}'")
-    except subprocess.CalledProcessError as e:
-        print(f"Error creating worktree: {e}", file=sys.stderr)
-        sys.exit(1)
+        # Create parent directories for target
+        wsl_target.parent.mkdir(parents=True, exist_ok=True)
 
-    # Save branch mapping for later sync
-    save_branch_config(relative_path, current_branch)
-    print(f"Saved branch mapping to {get_weaseltree_config()}")
+        # Create the worktree on the same branch
+        try:
+            subprocess.run(
+                ["git", "worktree", "add", str(wsl_target), current_branch],
+                check=True,
+            )
+            print(f"Created worktree at: {wsl_target} on branch '{current_branch}'")
+        except subprocess.CalledProcessError as e:
+            print(f"Error creating worktree: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Save worktree config for later sync
+    save_worktree_config(relative_path, current_branch, cwd)
+    print(f"Saved config to {get_weaseltree_config()}")
 
 
 def sync_command(args):
     cwd = os.getcwd()
 
+    # Try Windows side first (/mnt/c/...)
     relative_path = extract_relative_path(cwd)
-    if relative_path is None:
-        print(f"Error: Not under a drive root: {cwd}", file=sys.stderr)
-        sys.exit(1)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        if config is None:
+            print(f"Error: No config found for {relative_path}", file=sys.stderr)
+            print(f"Run 'weaseltree clone' first.", file=sys.stderr)
+            sys.exit(1)
 
-    # Load branch from config
-    branch = load_branch_config(relative_path)
-    if branch is None:
-        print(f"Error: No branch mapping found for {relative_path}", file=sys.stderr)
-        print(f"Run 'weaseltree clone' first.", file=sys.stderr)
-        sys.exit(1)
+        # Sync to latest version of the branch (detached)
+        try:
+            subprocess.run(["git", "checkout", "--detach", config["branch"]], check=True)
+            print(f"Synced to latest '{config['branch']}'")
+        except subprocess.CalledProcessError as e:
+            print(f"Error syncing: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
 
-    # Sync to latest version of the branch (detached)
-    try:
-        subprocess.run(["git", "checkout", "--detach", branch], check=True)
-        print(f"Synced to latest '{branch}'")
-    except subprocess.CalledProcessError as e:
-        print(f"Error syncing: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Try WSL side (~/...)
+    relative_path = extract_relative_path_from_wsl_home(cwd)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        windows_path = config["windows_path"]
+
+        # Sync Windows side to latest version of the branch (detached)
+        try:
+            subprocess.run(
+                ["git", "checkout", "--detach", config["branch"]],
+                cwd=windows_path,
+                check=True,
+            )
+            print(f"Synced Windows side ({windows_path}) to latest '{config['branch']}'")
+        except subprocess.CalledProcessError as e:
+            print(f"Error syncing Windows side: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    print(f"Error: Not a weaseltree-managed path: {cwd}", file=sys.stderr)
+    sys.exit(1)
 
 
 def push_command(args):
@@ -180,25 +259,77 @@ def push_command(args):
         print(f"Error: Not under a drive root: {cwd}", file=sys.stderr)
         sys.exit(1)
 
-    # Load branch from config
-    branch = load_branch_config(relative_path)
-    if branch is None:
-        print(f"Error: No branch mapping found for {relative_path}", file=sys.stderr)
+    # Load config
+    config = load_worktree_config(relative_path)
+    if config is None:
+        print(f"Error: No config found for {relative_path}", file=sys.stderr)
         print(f"Run 'weaseltree clone' first.", file=sys.stderr)
         sys.exit(1)
 
     # Push the branch to origin
     try:
-        subprocess.run(["git", "push", "origin", branch], check=True)
-        print(f"Pushed '{branch}' to origin")
+        subprocess.run(["git", "push", "origin", config["branch"]], check=True)
+        print(f"Pushed '{config['branch']}' to origin")
     except subprocess.CalledProcessError as e:
         print(f"Error pushing: {e}", file=sys.stderr)
         sys.exit(1)
 
 
+def show_status():
+    """Show available commands and current repository status."""
+    print("weaseltree - WSL git worktree helper")
+    print()
+    print("Commands:")
+    print("  clone  Create a git worktree mirroring the Windows path")
+    print("  sync   Sync Windows side to latest version of the branch")
+    print("  push   Push the WSL branch to origin")
+    print()
+
+    cwd = os.getcwd()
+    relative_path = extract_relative_path(cwd)
+
+    # Check if we're in a git repo
+    if not os.path.exists(os.path.join(cwd, ".git")):
+        print("Status: Not a git repository")
+        return
+
+    print("Status:")
+    current_branch = get_current_branch()
+    if current_branch:
+        print(f"  Branch: {current_branch}")
+    else:
+        print("  Branch: (detached HEAD)")
+
+    # Try Windows side first
+    if relative_path is not None:
+        print(f"  Relative path: {relative_path}")
+        config = load_worktree_config(relative_path)
+        if config:
+            print(f"  Mapped branch: {config['branch']}")
+            print(f"  Windows path: {config['windows_path']}")
+        wsl_target = Path.home() / relative_path
+        if wsl_target.exists():
+            print(f"  WSL worktree: {wsl_target}")
+        else:
+            print(f"  WSL worktree: (not created)")
+        return
+
+    # Try WSL side
+    relative_path = extract_relative_path_from_wsl_home(cwd)
+    if relative_path is not None:
+        print(f"  Relative path: {relative_path}")
+        config = load_worktree_config(relative_path)
+        if config:
+            print(f"  Mapped branch: {config['branch']}")
+            print(f"  Windows path: {config['windows_path']}")
+        return
+
+    print(f"  Path: {cwd} (not managed by weaseltree)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="WSL git worktree helper")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
 
     # clone subcommand
     clone_parser = subparsers.add_parser(
@@ -219,7 +350,10 @@ def main():
     push_parser.set_defaults(func=push_command)
 
     args = parser.parse_args()
-    args.func(args)
+    if args.command is None:
+        show_status()
+    else:
+        args.func(args)
 
 
 if __name__ == "__main__":
