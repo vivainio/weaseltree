@@ -73,6 +73,24 @@ def get_current_branch() -> str | None:
     return None
 
 
+def detach_head():
+    """Detach HEAD by writing commit SHA directly to .git/HEAD.
+
+    This is much faster than `git checkout --detach` because it
+    bypasses the working tree machinery.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Failed to get current commit")
+    commit_sha = result.stdout.strip()
+    with open(".git/HEAD", "w") as f:
+        f.write(commit_sha + "\n")
+
+
 def load_config() -> dict:
     """Load the full config from JSON file."""
     config_path = get_weaseltree_config()
@@ -170,10 +188,10 @@ def clone_command(args):
                 sys.exit(1)
 
             # Detach HEAD on Windows side
-            print("Detaching HEAD on Windows side...")
             try:
-                subprocess.run(["git", "checkout", "--detach"], check=True)
-            except subprocess.CalledProcessError as e:
+                detach_head()
+                print("Detached HEAD on Windows side")
+            except Exception as e:
                 print(f"Error detaching HEAD: {e}", file=sys.stderr)
                 sys.exit(1)
     else:
@@ -202,10 +220,10 @@ def clone_command(args):
                     sys.exit(1)
 
         # Detach HEAD on Windows side (to free up the branch)
-        print("Detaching HEAD on Windows side...")
         try:
-            subprocess.run(["git", "checkout", "--detach"], check=True)
-        except subprocess.CalledProcessError as e:
+            detach_head()
+            print("Detached HEAD on Windows side")
+        except Exception as e:
             print(f"Error detaching HEAD: {e}", file=sys.stderr)
             sys.exit(1)
 
