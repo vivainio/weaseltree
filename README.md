@@ -8,7 +8,7 @@ All filesystem operations from WSL on Windows drives (`/mnt/c/...`) are slow due
 
 AI coding tools like Claude Code also benefit significantly from fast filesystem access - file searches, code analysis, and edits are all much faster on native WSL paths.
 
-This tool creates a git worktree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for IDE access.
+This tool uses [git worktree](https://git-scm.com/docs/git-worktree) to create a linked working tree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for IDE access.
 
 ## Install
 
