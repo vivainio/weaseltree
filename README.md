@@ -32,6 +32,12 @@ This will:
 2. Create a worktree at `~/r/myproject` on the same branch
 3. Save the config to `~/.weaseltree` (Windows home)
 
+You can specify a custom target directory instead of mirroring the path:
+
+```bash
+weaseltree clone ~/projects/myproject
+```
+
 ### Sync
 
 Update the Windows side to the latest commit on the branch:
@@ -90,4 +96,5 @@ Stored at `%USERPROFILE%\.weaseltree`:
 [r/myproject]
 branch = feature-x
 windows_path = /mnt/c/r/myproject
+wsl_path = /home/user/r/myproject
 ```

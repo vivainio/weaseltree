@@ -59,21 +59,6 @@ def extract_relative_path(path: str) -> str | None:
     return None
 
 
-def extract_relative_path_from_wsl_home(path: str) -> str | None:
-    """Extract relative path from WSL home directory.
-
-    ~/r/foo/bar -> r/foo/bar
-    Returns the path only if it's registered in .weaseltree config.
-    """
-    home = str(Path.home())
-    if path.startswith(home + "/"):
-        relative = path[len(home) + 1:]
-        # Check if this relative path is in the config
-        if load_worktree_config(relative) is not None:
-            return relative
-    return None
-
-
 def get_current_branch() -> str | None:
     """Get the current git branch name."""
     result = subprocess.run(
@@ -88,7 +73,7 @@ def get_current_branch() -> str | None:
     return None
 
 
-def save_worktree_config(relative_path: str, branch: str, windows_path: str):
+def save_worktree_config(relative_path: str, branch: str, windows_path: str, wsl_path: str):
     """Save worktree config to Windows ~/.weaseltree config file."""
     config_path = get_weaseltree_config()
     config = configparser.ConfigParser()
@@ -99,6 +84,7 @@ def save_worktree_config(relative_path: str, branch: str, windows_path: str):
         config[relative_path] = {}
     config[relative_path]["branch"] = branch
     config[relative_path]["windows_path"] = windows_path
+    config[relative_path]["wsl_path"] = wsl_path
     with open(config_path, "w") as f:
         config.write(f)
 
@@ -113,7 +99,25 @@ def load_worktree_config(relative_path: str) -> dict | None:
             return {
                 "branch": config[relative_path].get("branch"),
                 "windows_path": config[relative_path].get("windows_path"),
+                "wsl_path": config[relative_path].get("wsl_path"),
             }
+    return None
+
+
+def find_config_by_wsl_path(wsl_path: str) -> tuple[str, dict] | None:
+    """Find worktree config by WSL path. Returns (relative_path, config) or None."""
+    config_path = get_weaseltree_config()
+    config = configparser.ConfigParser()
+    if config_path.exists():
+        config.read(config_path)
+        for section in config.sections():
+            stored_wsl_path = config[section].get("wsl_path")
+            if stored_wsl_path and stored_wsl_path == wsl_path:
+                return (section, {
+                    "branch": config[section].get("branch"),
+                    "windows_path": config[section].get("windows_path"),
+                    "wsl_path": stored_wsl_path,
+                })
     return None
 
 
@@ -125,7 +129,11 @@ def clone_command(args):
         print(f"Error: Not under /mnt/<drive>/: {cwd}", file=sys.stderr)
         sys.exit(1)
 
-    wsl_target = Path.home() / relative_path
+    # Use custom target if specified, otherwise mirror the path structure
+    if args.target:
+        wsl_target = Path(args.target).expanduser().resolve()
+    else:
+        wsl_target = Path.home() / relative_path
 
     # Verify current dir is a git repo
     if not os.path.exists(os.path.join(cwd, ".git")):
@@ -204,7 +212,7 @@ def clone_command(args):
             sys.exit(1)
 
     # Save worktree config for later sync
-    save_worktree_config(relative_path, current_branch, cwd)
+    save_worktree_config(relative_path, current_branch, cwd, str(wsl_target))
     print(f"Saved config to {get_weaseltree_config()}")
 
 
@@ -234,20 +242,20 @@ def sync_command(args):
             sys.exit(1)
         return
 
-    # Try WSL side (~/...)
-    relative_path = extract_relative_path_from_wsl_home(cwd)
-    if relative_path is not None:
-        config = load_worktree_config(relative_path)
+    # Try WSL side (lookup by wsl_path)
+    result = find_config_by_wsl_path(cwd)
+    if result is not None:
+        _, config = result
         windows_path = config["windows_path"]
 
         # Verify Windows side is in detached HEAD before using --force
-        result = subprocess.run(
+        check = subprocess.run(
             ["git.exe", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=windows_path,
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0 and result.stdout.strip() != "HEAD":
+        if check.returncode == 0 and check.stdout.strip() != "HEAD":
             print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
             sys.exit(1)
 
@@ -289,10 +297,10 @@ def push_command(args):
             sys.exit(1)
         return
 
-    # Try WSL side (~/...)
-    relative_path = extract_relative_path_from_wsl_home(cwd)
-    if relative_path is not None:
-        config = load_worktree_config(relative_path)
+    # Try WSL side (lookup by wsl_path)
+    result = find_config_by_wsl_path(cwd)
+    if result is not None:
+        _, config = result
         windows_path = config["windows_path"]
 
         # Push from Windows side using git.exe (uses Windows remotes/credentials)
@@ -316,13 +324,13 @@ def up_command(args):
     """Copy uncommitted changes from WSL to Windows side."""
     cwd = os.getcwd()
 
-    # Must be on WSL side
-    relative_path = extract_relative_path_from_wsl_home(cwd)
-    if relative_path is None:
+    # Must be on WSL side (lookup by wsl_path)
+    result = find_config_by_wsl_path(cwd)
+    if result is None:
         print(f"Error: Not a weaseltree-managed WSL path: {cwd}", file=sys.stderr)
         sys.exit(1)
 
-    config = load_worktree_config(relative_path)
+    _, config = result
     windows_path = Path(config["windows_path"])
 
     # Get list of changed files (modified, added, untracked)
@@ -412,21 +420,21 @@ def show_status():
         if config:
             print(f"  Mapped branch: {config['branch']}")
             print(f"  Windows path: {config['windows_path']}")
-        wsl_target = Path.home() / relative_path
-        if wsl_target.exists():
-            print(f"  WSL worktree: {wsl_target}")
-        else:
-            print(f"  WSL worktree: (not created)")
+            wsl_path = config.get('wsl_path')
+            if wsl_path and Path(wsl_path).exists():
+                print(f"  WSL worktree: {wsl_path}")
+            else:
+                print(f"  WSL worktree: (not created)")
         return
 
-    # Try WSL side
-    relative_path = extract_relative_path_from_wsl_home(cwd)
-    if relative_path is not None:
-        print(f"  Relative path: {relative_path}")
-        config = load_worktree_config(relative_path)
-        if config:
-            print(f"  Mapped branch: {config['branch']}")
-            print(f"  Windows path: {config['windows_path']}")
+    # Try WSL side (lookup by wsl_path)
+    result = find_config_by_wsl_path(cwd)
+    if result is not None:
+        rel_path, config = result
+        print(f"  Config key: {rel_path}")
+        print(f"  Mapped branch: {config['branch']}")
+        print(f"  Windows path: {config['windows_path']}")
+        print(f"  WSL worktree: {config['wsl_path']}")
         return
 
     print(f"  Path: {cwd} (not managed by weaseltree)")
@@ -439,6 +447,10 @@ def main():
     # clone subcommand
     clone_parser = subparsers.add_parser(
         "clone", help="Create a git worktree mirroring the Windows path"
+    )
+    clone_parser.add_argument(
+        "target", nargs="?", default=None,
+        help="Target directory for worktree (default: ~/relative/path)"
     )
     clone_parser.set_defaults(func=clone_command)
 
