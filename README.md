@@ -8,7 +8,7 @@ All filesystem operations from WSL on Windows drives (`/mnt/c/...`) are slow due
 
 AI coding tools like Claude Code also benefit significantly from fast filesystem access - file searches, code analysis, and edits are all much faster on native WSL paths.
 
-This tool uses [git worktree](https://git-scm.com/docs/git-worktree) to create a linked working tree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for IDE access.
+This tool uses [git worktree](https://git-scm.com/docs/git-worktree) to create a linked working tree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for Windows-native tools.
 
 ## Install
 
@@ -52,7 +52,7 @@ Copy uncommitted changes from WSL to Windows (without committing):
 weaseltree up
 ```
 
-This copies all modified, added, and untracked files to the Windows worktree. Useful for previewing changes in a Windows IDE before committing.
+This copies all modified, added, and untracked files to the Windows worktree. Useful when you need Windows tools to see uncommitted changes.
 
 ### Push
 
@@ -76,9 +76,9 @@ weaseltree
 1. Start with a repo on Windows: `/mnt/c/r/myproject` on branch `feature-x`
 2. Run `weaseltree clone` to create `~/r/myproject` worktree
 3. Work in `~/r/myproject` (fast filesystem - builds, git, everything)
-4. Run `weaseltree up` to copy uncommitted changes to Windows (for IDE preview)
+4. Run `weaseltree up` to copy uncommitted changes to Windows
 5. Run `weaseltree sync` after commits to update Windows side
-6. Use Windows IDE pointing at `C:\r\myproject` (sees synced changes)
+6. Access `C:\r\myproject` with Windows-native tools as needed
 
 ## Config
 
