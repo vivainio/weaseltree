@@ -170,9 +170,9 @@ def clone_command(args):
                 sys.exit(1)
 
             # Detach HEAD on Windows side
+            print("Detaching HEAD on Windows side...")
             try:
                 subprocess.run(["git", "checkout", "--detach"], check=True)
-                print(f"Detached HEAD on Windows side")
             except subprocess.CalledProcessError as e:
                 print(f"Error detaching HEAD: {e}", file=sys.stderr)
                 sys.exit(1)
@@ -202,9 +202,9 @@ def clone_command(args):
                     sys.exit(1)
 
         # Detach HEAD on Windows side (to free up the branch)
+        print("Detaching HEAD on Windows side...")
         try:
             subprocess.run(["git", "checkout", "--detach"], check=True)
-            print(f"Detached HEAD on Windows side")
         except subprocess.CalledProcessError as e:
             print(f"Error detaching HEAD: {e}", file=sys.stderr)
             sys.exit(1)
