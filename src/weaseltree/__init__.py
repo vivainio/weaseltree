@@ -189,6 +189,22 @@ def clone_command(args):
             print("Error: Not on a branch (detached HEAD?)", file=sys.stderr)
             sys.exit(1)
 
+        # Check if branch is already checked out in another worktree
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        current_wt_path = None
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                current_wt_path = line[9:]
+            elif line == f"branch refs/heads/{current_branch}":
+                print(f"Error: Branch '{current_branch}' is already checked out at:", file=sys.stderr)
+                print(f"  {current_wt_path}", file=sys.stderr)
+                print(f"Remove it first: git worktree remove {current_wt_path}", file=sys.stderr)
+                sys.exit(1)
+
         # Detach HEAD on Windows side (to free up the branch)
         try:
             subprocess.run(["git", "checkout", "--detach"], check=True)
