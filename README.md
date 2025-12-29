@@ -56,12 +56,14 @@ This copies all modified, added, and untracked files to the Windows worktree. Us
 
 ### Push
 
-Push the branch to origin (from Windows side):
+Push the branch to origin:
 
 ```bash
-cd /mnt/c/r/myproject
+# From either side
 weaseltree push
 ```
+
+Uses `git.exe` when run from WSL, so Windows-side git remotes and credentials are used.
 
 ### Status
 

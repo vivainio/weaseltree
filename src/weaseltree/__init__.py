@@ -271,25 +271,45 @@ def sync_command(args):
 def push_command(args):
     cwd = os.getcwd()
 
+    # Try Windows side first (/mnt/c/...)
     relative_path = extract_relative_path(cwd)
-    if relative_path is None:
-        print(f"Error: Not under a drive root: {cwd}", file=sys.stderr)
-        sys.exit(1)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        if config is None:
+            print(f"Error: No config found for {relative_path}", file=sys.stderr)
+            print(f"Run 'weaseltree clone' first.", file=sys.stderr)
+            sys.exit(1)
 
-    # Load config
-    config = load_worktree_config(relative_path)
-    if config is None:
-        print(f"Error: No config found for {relative_path}", file=sys.stderr)
-        print(f"Run 'weaseltree clone' first.", file=sys.stderr)
-        sys.exit(1)
+        # Push the branch to origin
+        try:
+            subprocess.run(["git", "push", "origin", config["branch"]], check=True)
+            print(f"Pushed '{config['branch']}' to origin")
+        except subprocess.CalledProcessError as e:
+            print(f"Error pushing: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
 
-    # Push the branch to origin
-    try:
-        subprocess.run(["git", "push", "origin", config["branch"]], check=True)
-        print(f"Pushed '{config['branch']}' to origin")
-    except subprocess.CalledProcessError as e:
-        print(f"Error pushing: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Try WSL side (~/...)
+    relative_path = extract_relative_path_from_wsl_home(cwd)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        windows_path = config["windows_path"]
+
+        # Push from Windows side using git.exe (uses Windows remotes/credentials)
+        try:
+            subprocess.run(
+                ["git.exe", "push", "origin", config["branch"]],
+                cwd=windows_path,
+                check=True,
+            )
+            print(f"Pushed '{config['branch']}' to origin (via Windows)")
+        except subprocess.CalledProcessError as e:
+            print(f"Error pushing: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    print(f"Error: Not a weaseltree-managed path: {cwd}", file=sys.stderr)
+    sys.exit(1)
 
 
 def up_command(args):
