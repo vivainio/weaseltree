@@ -39,6 +39,17 @@ weaseltree sync
 
 Run this after making commits on the WSL side to update the Windows worktree.
 
+### Up
+
+Copy uncommitted changes from WSL to Windows (without committing):
+
+```bash
+# From WSL side
+weaseltree up
+```
+
+This copies all modified, added, and untracked files to the Windows worktree. Useful for previewing changes in a Windows IDE before committing.
+
 ### Push
 
 Push the branch to origin (from Windows side):

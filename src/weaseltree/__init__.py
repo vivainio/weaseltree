@@ -2,6 +2,7 @@ import argparse
 import configparser
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -275,6 +276,73 @@ def push_command(args):
         sys.exit(1)
 
 
+def up_command(args):
+    """Copy uncommitted changes from WSL to Windows side."""
+    cwd = os.getcwd()
+
+    # Must be on WSL side
+    relative_path = extract_relative_path_from_wsl_home(cwd)
+    if relative_path is None:
+        print(f"Error: Not a weaseltree-managed WSL path: {cwd}", file=sys.stderr)
+        sys.exit(1)
+
+    config = load_worktree_config(relative_path)
+    windows_path = Path(config["windows_path"])
+
+    # Get list of changed files (modified, added, untracked)
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Error running git status: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    lines = result.stdout.splitlines()
+    if not lines:
+        print("No changes to copy")
+        return
+
+    copied = 0
+    deleted = 0
+    for line in lines:
+        if not line:
+            continue
+        status = line[:2]
+        filepath = line[3:]
+
+        # Handle renames (R oldname -> newname)
+        if " -> " in filepath:
+            filepath = filepath.split(" -> ")[1]
+
+        src = Path(cwd) / filepath
+        dst = windows_path / filepath
+
+        # Handle deletions
+        if status.strip() == "D":
+            if dst.exists():
+                dst.unlink()
+                print(f"  Deleted: {filepath}")
+                deleted += 1
+            continue
+
+        if not src.exists():
+            continue
+
+        # Create parent directories if needed
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy file
+        shutil.copy2(src, dst)
+        print(f"  Copied: {filepath}")
+        copied += 1
+
+    print(f"Copied {copied} file(s) to {windows_path}")
+    if deleted:
+        print(f"Deleted {deleted} file(s)")
+
+
 def show_status():
     """Show available commands and current repository status."""
     print("weaseltree - WSL git worktree helper")
@@ -282,6 +350,7 @@ def show_status():
     print("Commands:")
     print("  clone  Create a git worktree mirroring the Windows path")
     print("  sync   Sync Windows side to latest version of the branch")
+    print("  up     Copy uncommitted changes from WSL to Windows")
     print("  push   Push the WSL branch to origin")
     print()
 
@@ -348,6 +417,12 @@ def main():
         "push", help="Push the WSL branch to origin"
     )
     push_parser.set_defaults(func=push_command)
+
+    # up subcommand
+    up_parser = subparsers.add_parser(
+        "up", help="Copy uncommitted changes from WSL to Windows"
+    )
+    up_parser.set_defaults(func=up_command)
 
     args = parser.parse_args()
     if args.command is None:
