@@ -225,9 +225,9 @@ def sync_command(args):
             print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
             sys.exit(1)
 
-        # Sync to latest version of the branch (detached, force to discard local changes)
+        # Sync to latest version of the branch using git.exe for proper Windows line endings
         try:
-            subprocess.run(["git", "checkout", "--force", "--detach", config["branch"]], check=True)
+            subprocess.run(["git.exe", "checkout", "--force", "--detach", config["branch"]], check=True)
             print(f"Synced to latest '{config['branch']}'")
         except subprocess.CalledProcessError as e:
             print(f"Error syncing: {e}", file=sys.stderr)
@@ -242,7 +242,7 @@ def sync_command(args):
 
         # Verify Windows side is in detached HEAD before using --force
         result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git.exe", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=windows_path,
             capture_output=True,
             text=True,
@@ -251,10 +251,10 @@ def sync_command(args):
             print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
             sys.exit(1)
 
-        # Sync Windows side to latest version of the branch (detached, force to discard local changes)
+        # Sync Windows side using git.exe for proper Windows line endings
         try:
             subprocess.run(
-                ["git", "checkout", "--force", "--detach", config["branch"]],
+                ["git.exe", "checkout", "--force", "--detach", config["branch"]],
                 cwd=windows_path,
                 check=True,
             )
