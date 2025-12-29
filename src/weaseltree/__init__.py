@@ -183,7 +183,7 @@ def clone_command(args):
             print("Error: Not on a branch (detached HEAD?)", file=sys.stderr)
             sys.exit(1)
 
-        # Check if branch is already checked out in another worktree
+        # Check if branch is already checked out in another worktree (not cwd)
         result = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             capture_output=True,
@@ -194,10 +194,12 @@ def clone_command(args):
             if line.startswith("worktree "):
                 current_wt_path = line[9:]
             elif line == f"branch refs/heads/{current_branch}":
-                print(f"Error: Branch '{current_branch}' is already checked out at:", file=sys.stderr)
-                print(f"  {current_wt_path}", file=sys.stderr)
-                print(f"Remove it first: git worktree remove {current_wt_path}", file=sys.stderr)
-                sys.exit(1)
+                # Skip if it's the current directory (we'll detach it)
+                if current_wt_path != cwd:
+                    print(f"Error: Branch '{current_branch}' is already checked out at:", file=sys.stderr)
+                    print(f"  {current_wt_path}", file=sys.stderr)
+                    print(f"Remove it first: git worktree remove {current_wt_path}", file=sys.stderr)
+                    sys.exit(1)
 
         # Detach HEAD on Windows side (to free up the branch)
         try:
@@ -330,6 +332,77 @@ def push_command(args):
     sys.exit(1)
 
 
+def pull_command(args):
+    """Fetch from origin and update the branch."""
+    cwd = os.getcwd()
+
+    # Try Windows side first (/mnt/c/...)
+    relative_path = extract_relative_path(cwd)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        if config is None:
+            print(f"Error: No config found for {relative_path}", file=sys.stderr)
+            print(f"Run 'weaseltree clone' first.", file=sys.stderr)
+            sys.exit(1)
+
+        wsl_path = config.get("wsl_path")
+        if not wsl_path or not Path(wsl_path).exists():
+            print(f"Error: WSL worktree not found: {wsl_path}", file=sys.stderr)
+            sys.exit(1)
+
+        # Fetch from origin using git.exe (Windows credentials/remotes)
+        try:
+            subprocess.run(["git.exe", "fetch", "origin"], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error fetching: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # Update the branch in WSL worktree (fast-forward merge)
+        try:
+            subprocess.run(
+                ["git", "merge", "--ff-only", f"origin/{config['branch']}"],
+                cwd=wsl_path,
+                check=True,
+            )
+            print(f"Updated '{config['branch']}' from origin")
+        except subprocess.CalledProcessError as e:
+            print(f"Error merging: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Try WSL side (lookup by wsl_path)
+    result = find_config_by_wsl_path(cwd)
+    if result is not None:
+        _, config = result
+        windows_path = config["windows_path"]
+
+        # Fetch from origin using git.exe (Windows credentials/remotes)
+        try:
+            subprocess.run(
+                ["git.exe", "fetch", "origin"],
+                cwd=windows_path,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Error fetching: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # Update the branch in WSL worktree (fast-forward merge)
+        try:
+            subprocess.run(
+                ["git", "merge", "--ff-only", f"origin/{config['branch']}"],
+                check=True,
+            )
+            print(f"Updated '{config['branch']}' from origin")
+        except subprocess.CalledProcessError as e:
+            print(f"Error merging: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    print(f"Error: Not a weaseltree-managed path: {cwd}", file=sys.stderr)
+    sys.exit(1)
+
+
 def up_command(args):
     """Copy uncommitted changes from WSL to Windows side."""
     cwd = os.getcwd()
@@ -432,6 +505,7 @@ def show_status():
     print("  sync   Sync Windows side to latest version of the branch")
     print("  up     Copy uncommitted changes from WSL to Windows")
     print("  push   Push the WSL branch to origin")
+    print("  pull   Fetch from origin and update the branch")
     print()
 
     cwd = os.getcwd()
@@ -507,6 +581,12 @@ def main():
         "up", help="Copy uncommitted changes from WSL to Windows"
     )
     up_parser.set_defaults(func=up_command)
+
+    # pull subcommand
+    pull_parser = subparsers.add_parser(
+        "pull", help="Fetch from origin and update the branch"
+    )
+    pull_parser.set_defaults(func=pull_command)
 
     args = parser.parse_args()
     if args.command is None:
