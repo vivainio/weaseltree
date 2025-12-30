@@ -538,6 +538,21 @@ def up_command(args):
         print(f"Deleted {deleted} file(s)")
 
 
+def list_command(args):
+    """List all weaseltree-managed directories."""
+    config = load_config()
+    if not config:
+        print("No managed directories")
+        return
+
+    for key, entry in config.items():
+        if isinstance(entry, dict):
+            print(f"{key}:")
+            print(f"  branch:  {entry.get('branch', '?')}")
+            print(f"  windows: {entry.get('windows_path', '?')}")
+            print(f"  wsl:     {entry.get('wsl_path', '?')}")
+
+
 def show_status():
     """Show available commands and current repository status."""
     print("weaseltree - WSL git worktree helper")
@@ -548,6 +563,7 @@ def show_status():
     print("  up     Copy uncommitted changes from WSL to Windows")
     print("  push   Push the WSL branch to origin")
     print("  pull   Fetch from origin and update the branch")
+    print("  list   List all managed directories")
     print()
 
     cwd = os.getcwd()
@@ -629,6 +645,12 @@ def main():
         "pull", help="Fetch from origin and update the branch"
     )
     pull_parser.set_defaults(func=pull_command)
+
+    # list subcommand
+    list_parser = subparsers.add_parser(
+        "list", help="List all managed directories"
+    )
+    list_parser.set_defaults(func=list_command)
 
     args = parser.parse_args()
     if args.command is None:
