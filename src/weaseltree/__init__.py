@@ -553,6 +553,38 @@ def list_command(args):
             print(f"  wsl:     {entry.get('wsl_path', '?')}")
 
 
+def run_command(args):
+    """Run a command on the Windows side in the corresponding directory."""
+    if not args.cmd:
+        print("Error: No command specified", file=sys.stderr)
+        print("Usage: weaseltree run <command> [args...]", file=sys.stderr)
+        sys.exit(1)
+
+    cwd = os.getcwd()
+
+    # Try Windows side first (/mnt/c/...)
+    relative_path = extract_relative_path(cwd)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        if config:
+            windows_path = config["windows_path"]
+        else:
+            windows_path = cwd
+    else:
+        # Try WSL side (lookup by wsl_path)
+        result = find_config_by_wsl_path(cwd)
+        if result is not None:
+            _, config = result
+            windows_path = config["windows_path"]
+        else:
+            print(f"Error: Not a weaseltree-managed path: {cwd}", file=sys.stderr)
+            print("Run 'weaseltree clone' first to set up the mapping.", file=sys.stderr)
+            sys.exit(1)
+
+    result = subprocess.run(["cmd.exe", "/c"] + args.cmd, cwd=windows_path)
+    sys.exit(result.returncode)
+
+
 def show_status():
     """Show available commands and current repository status."""
     print("weaseltree - WSL git worktree helper")
@@ -564,6 +596,7 @@ def show_status():
     print("  push   Push the WSL branch to origin")
     print("  pull   Fetch from origin and update the branch")
     print("  list   List all managed directories")
+    print("  run    Run a command on the Windows side")
     print()
 
     cwd = os.getcwd()
@@ -651,6 +684,13 @@ def main():
         "list", help="List all managed directories"
     )
     list_parser.set_defaults(func=list_command)
+
+    # run subcommand
+    run_parser = subparsers.add_parser(
+        "run", help="Run a command on the Windows side"
+    )
+    run_parser.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to run")
+    run_parser.set_defaults(func=run_command)
 
     args = parser.parse_args()
     if args.command is None:
