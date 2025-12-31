@@ -142,6 +142,15 @@ def find_config_by_branch(branch: str) -> tuple[str, dict] | None:
     return None
 
 
+def find_config_by_windows_path(windows_path: str) -> tuple[str, dict] | None:
+    """Find worktree config by Windows path. Returns (relative_path, config) or None."""
+    config = load_config()
+    for key, entry in config.items():
+        if isinstance(entry, dict) and entry.get("windows_path") == windows_path:
+            return (key, entry)
+    return None
+
+
 def get_main_repo_from_worktree() -> str | None:
     """Get the main repo path from a worktree's .git file.
 
@@ -317,61 +326,72 @@ def clone_command(args):
 
 def fix_moved_worktree(cwd: str, branch: str) -> tuple[str, dict] | None:
     """Fix config when a worktree has moved. Returns (relative_path, config) or None."""
-    result = find_config_by_branch(branch)
-
     # Determine if we're on Windows or WSL side
     relative_path = extract_relative_path(cwd)
 
+    if relative_path is None:
+        # WSL side - use worktree .git file to find main repo (most reliable)
+        main_repo = get_main_repo_from_worktree()
+        if not main_repo:
+            print("Error: Could not determine main repo from worktree", file=sys.stderr)
+            return None
+
+        main_relative = extract_relative_path(main_repo)
+        if not main_relative:
+            print(f"Error: Main repo not under /mnt/<drive>/: {main_repo}", file=sys.stderr)
+            return None
+
+        print(f"Found main repo: {main_repo}")
+
+        # Check for stale worktree entries and remove them
+        remove_stale_worktree(main_repo, cwd)
+
+        # Look up config by windows_path (not branch - avoids ambiguity)
+        result = find_config_by_windows_path(main_repo)
+        if result:
+            old_key, old_config = result
+            old_wsl_path = old_config.get("wsl_path")
+            if old_wsl_path != cwd:
+                print(f"  WSL path: {old_wsl_path} -> {cwd}")
+            if old_config.get("branch") != branch:
+                print(f"  Branch: {old_config.get('branch')} -> {branch}")
+            print(f"Updated config for {old_key}")
+        else:
+            print(f"Created config for {main_relative}")
+
+        new_config = {
+            "branch": branch,
+            "windows_path": main_repo,
+            "wsl_path": cwd,
+        }
+        save_worktree_config(main_relative, branch, main_repo, cwd)
+
+        # Repair git worktree links
+        repair_result = subprocess.run(
+            ["git", "worktree", "repair"],
+            capture_output=True,
+            text=True,
+        )
+        if repair_result.returncode == 0:
+            if repair_result.stderr.strip():
+                print(f"Repaired worktree: {repair_result.stderr.strip()}")
+            else:
+                print("Worktree links OK")
+
+        return (main_relative, new_config)
+
+    # Windows side - look up by branch (less common case for --fix)
+    result = find_config_by_branch(branch)
     if result is None:
-        # No config found by branch - try to find main repo from worktree .git file
-        if relative_path is None:
-            # We're on WSL side, try to find Windows (main repo) path
-            main_repo = get_main_repo_from_worktree()
-            if main_repo:
-                main_relative = extract_relative_path(main_repo)
-                if main_relative:
-                    print(f"Found main repo from worktree: {main_repo}")
-
-                    # Check for stale worktree entries and remove them
-                    remove_stale_worktree(main_repo, cwd)
-
-                    new_config = {
-                        "branch": branch,
-                        "windows_path": main_repo,
-                        "wsl_path": cwd,
-                    }
-                    save_worktree_config(main_relative, branch, main_repo, cwd)
-                    print(f"Created config for {main_relative}")
-
-                    # Repair git worktree links
-                    repair_result = subprocess.run(
-                        ["git", "worktree", "repair"],
-                        capture_output=True,
-                        text=True,
-                    )
-                    if repair_result.returncode == 0:
-                        if repair_result.stderr.strip():
-                            print(f"Repaired worktree: {repair_result.stderr.strip()}")
-                        else:
-                            print("Worktree links OK")
-
-                    return (main_relative, new_config)
         return None
 
     old_key, old_config = result
     old_wsl_path = old_config.get("wsl_path")
     old_windows_path = old_config.get("windows_path")
 
-    if relative_path is not None:
-        # Windows side moved
-        new_windows_path = cwd
-        new_wsl_path = old_wsl_path  # Keep old WSL path
-        new_key = relative_path
-    else:
-        # WSL side moved
-        new_wsl_path = cwd
-        new_windows_path = old_windows_path  # Keep old Windows path
-        new_key = old_key  # Keep old key (based on Windows path)
+    new_windows_path = cwd
+    new_wsl_path = old_wsl_path  # Keep old WSL path
+    new_key = relative_path
 
     print(f"Found config for branch '{branch}':")
     print(f"  Old key: {old_key}")
@@ -379,8 +399,6 @@ def fix_moved_worktree(cwd: str, branch: str) -> tuple[str, dict] | None:
         print(f"  New key: {new_key}")
     if new_windows_path != old_windows_path:
         print(f"  Windows: {old_windows_path} -> {new_windows_path}")
-    if new_wsl_path != old_wsl_path:
-        print(f"  WSL: {old_wsl_path} -> {new_wsl_path}")
 
     # Update config
     config = load_config()
@@ -395,7 +413,6 @@ def fix_moved_worktree(cwd: str, branch: str) -> tuple[str, dict] | None:
     print(f"Updated config")
 
     # Repair git worktree links
-    # Run repair from WSL worktree to update the main repo's worktree list
     if new_wsl_path and Path(new_wsl_path).exists():
         repair_result = subprocess.run(
             ["git", "worktree", "repair"],
