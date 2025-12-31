@@ -458,9 +458,22 @@ def sync_command(args):
                 sys.exit(1)
 
         # Verify we're in detached HEAD before using --force
-        if get_current_branch() is not None:
-            print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
-            sys.exit(1)
+        win_branch = get_current_branch()
+        if win_branch is not None:
+            print(f"Windows side is on branch '{win_branch}', not detached HEAD.")
+            try:
+                response = input(f"Detach HEAD? [y/N] ")
+            except EOFError:
+                response = ""
+            if response.lower() != "y":
+                print("Aborted.")
+                sys.exit(1)
+            try:
+                detach_head()
+                print(f"Detached HEAD")
+            except Exception as e:
+                print(f"Error detaching HEAD: {e}", file=sys.stderr)
+                sys.exit(1)
 
         # Check if WSL worktree branch has changed
         wsl_path = config.get("wsl_path")
@@ -510,8 +523,31 @@ def sync_command(args):
             text=True,
         )
         if check.returncode == 0 and check.stdout.strip() != "HEAD":
-            print(f"Error: Windows side is not in detached HEAD. Run 'weaseltree clone' to fix.", file=sys.stderr)
-            sys.exit(1)
+            win_branch = check.stdout.strip()
+            print(f"Windows side is on branch '{win_branch}', not detached HEAD.")
+            try:
+                response = input(f"Detach HEAD on Windows side? [y/N] ")
+            except EOFError:
+                response = ""
+            if response.lower() != "y":
+                print("Aborted.")
+                sys.exit(1)
+            # Detach HEAD on Windows side
+            try:
+                detach_result = subprocess.run(
+                    ["git.exe", "rev-parse", "HEAD"],
+                    cwd=windows_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                commit_sha = detach_result.stdout.strip()
+                head_path = Path(windows_path) / ".git" / "HEAD"
+                head_path.write_text(commit_sha + "\n")
+                print(f"Detached HEAD on Windows side")
+            except Exception as e:
+                print(f"Error detaching HEAD: {e}", file=sys.stderr)
+                sys.exit(1)
 
         # Check if current branch has changed
         current_branch = get_current_branch()
