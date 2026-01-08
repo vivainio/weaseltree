@@ -886,6 +886,10 @@ def show_status():
 
 
 def main():
+    if is_native_windows():
+        print("Error: weaseltree must be run from WSL, not Windows", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description="WSL git worktree helper")
     subparsers = parser.add_subparsers(dest="command")
 
