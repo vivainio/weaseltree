@@ -59,6 +59,18 @@ def extract_relative_path(path: str) -> str | None:
     return None
 
 
+def get_git_toplevel() -> str | None:
+    """Get the root directory of the current git repository."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
 def get_current_branch() -> str | None:
     """Get the current git branch name."""
     result = subprocess.run(
@@ -149,6 +161,80 @@ def find_config_by_windows_path(windows_path: str) -> tuple[str, dict] | None:
         if isinstance(entry, dict) and entry.get("windows_path") == windows_path:
             return (key, entry)
     return None
+
+
+def get_windows_ahead_commits(windows_path: str, branch: str) -> list[tuple[str, str]]:
+    """Get commits on Windows HEAD that are not on the given branch.
+
+    Returns list of (sha, subject) tuples, oldest first.
+    """
+    result = subprocess.run(
+        ["git.exe", "log", "--oneline", "--reverse", f"{branch}..HEAD"],
+        cwd=windows_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+    commits = []
+    for line in result.stdout.strip().splitlines():
+        sha, _, subject = line.partition(" ")
+        commits.append((sha, subject))
+    return commits
+
+
+def pull_windows_commits(wsl_path: str, commits: list[tuple[str, str]]):
+    """Cherry-pick Windows-side commits onto the WSL branch."""
+    shas = [sha for sha, _ in commits]
+    subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", "cherry-pick"] + shas,
+        cwd=wsl_path,
+        check=True,
+    )
+
+
+def check_windows_ahead(windows_path: str, wsl_path: str | None, branch: str,
+                        *, pull: bool = False, drop: bool = False) -> bool:
+    """Check if Windows side has commits ahead of branch. Prompt to pull/drop/abort.
+
+    Returns True if sync should proceed, False if aborted.
+    """
+    ahead = get_windows_ahead_commits(windows_path, branch)
+    if not ahead:
+        return True
+
+    print(f"Windows side has {len(ahead)} commit(s) not on '{branch}':")
+    for sha, subject in ahead:
+        print(f"  {sha} {subject}")
+
+    if pull:
+        response = "p"
+    elif drop:
+        response = "d"
+    else:
+        if wsl_path and Path(wsl_path).exists():
+            prompt = "[p]ull to WSL branch / [d]rop / [a]bort? "
+        else:
+            prompt = "[d]rop / [a]bort? "
+        try:
+            response = input(prompt).strip().lower()
+        except EOFError:
+            response = ""
+
+    if response == "p" and wsl_path and Path(wsl_path).exists():
+        try:
+            pull_windows_commits(wsl_path, ahead)
+            print(f"Cherry-picked {len(ahead)} commit(s) onto WSL branch")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error cherry-picking: {e}", file=sys.stderr)
+            print("Aborting sync. Resolve conflicts manually.", file=sys.stderr)
+            return False
+    elif response == "d":
+        return True
+    else:
+        print("Aborted.")
+        return False
 
 
 def get_main_repo_from_worktree() -> str | None:
@@ -432,7 +518,7 @@ def fix_moved_worktree(cwd: str, branch: str) -> tuple[str, dict] | None:
 
 
 def sync_command(args):
-    cwd = os.getcwd()
+    cwd = get_git_toplevel() or os.getcwd()
 
     # Try Windows side first (/mnt/c/...)
     relative_path = extract_relative_path(cwd)
@@ -490,6 +576,12 @@ def sync_command(args):
                     print(f"Branch changed: {config['branch']} -> {current_branch}")
                     config["branch"] = current_branch
                     save_worktree_config(relative_path, current_branch, config["windows_path"], wsl_path)
+
+        # Check for commits on Windows side that would be lost
+        if not check_windows_ahead(cwd, wsl_path, config["branch"],
+                                   pull=getattr(args, 'pull', False),
+                                   drop=getattr(args, 'drop', False)):
+            sys.exit(1)
 
         # Sync to latest version of the branch using git.exe for proper Windows line endings
         try:
@@ -556,6 +648,12 @@ def sync_command(args):
             config["branch"] = current_branch
             save_worktree_config(relative_path, current_branch, windows_path, cwd)
 
+        # Check for commits on Windows side that would be lost
+        if not check_windows_ahead(windows_path, cwd, config["branch"],
+                                   pull=getattr(args, 'pull', False),
+                                   drop=getattr(args, 'drop', False)):
+            sys.exit(1)
+
         # Sync Windows side using git.exe for proper Windows line endings
         try:
             subprocess.run(
@@ -575,7 +673,7 @@ def sync_command(args):
 
 
 def push_command(args):
-    cwd = os.getcwd()
+    cwd = get_git_toplevel() or os.getcwd()
 
     # Try Windows side first (/mnt/c/...)
     relative_path = extract_relative_path(cwd)
@@ -620,7 +718,7 @@ def push_command(args):
 
 def pull_command(args):
     """Fetch from origin and update the branch."""
-    cwd = os.getcwd()
+    cwd = get_git_toplevel() or os.getcwd()
 
     # Try Windows side first (/mnt/c/...)
     relative_path = extract_relative_path(cwd)
@@ -691,7 +789,7 @@ def pull_command(args):
 
 def up_command(args):
     """Copy uncommitted changes from WSL to Windows side."""
-    cwd = os.getcwd()
+    cwd = get_git_toplevel() or os.getcwd()
 
     # Must be on WSL side (lookup by wsl_path)
     result = find_config_by_wsl_path(cwd)
@@ -804,7 +902,7 @@ def run_command(args):
         print("Usage: weaseltree run <command> [args...]", file=sys.stderr)
         sys.exit(1)
 
-    cwd = os.getcwd()
+    cwd = get_git_toplevel() or os.getcwd()
 
     # Try Windows side first (/mnt/c/...)
     relative_path = extract_relative_path(cwd)
@@ -910,6 +1008,15 @@ def main():
     sync_parser.add_argument(
         "--fix", action="store_true",
         help="Fix config if repo has moved (uses branch name to find entry)"
+    )
+    sync_ahead = sync_parser.add_mutually_exclusive_group()
+    sync_ahead.add_argument(
+        "--pull", action="store_true",
+        help="Pull Windows-side commits to WSL branch before syncing"
+    )
+    sync_ahead.add_argument(
+        "--drop", action="store_true",
+        help="Drop Windows-side commits and sync without prompting"
     )
     sync_parser.set_defaults(func=sync_command)
 
