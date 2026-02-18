@@ -838,7 +838,7 @@ def up_command(args):
                 deleted += 1
             continue
 
-        if not src.exists():
+        if not src.exists() or src.is_dir():
             continue
 
         # Create parent directories if needed
