@@ -82,6 +82,26 @@ weaseltree pull
 
 Uses `git.exe` for fetch (Windows credentials), then fast-forward merges into the WSL worktree.
 
+### Attach
+
+Hand off to the Windows side by putting it back on the real branch (and detaching WSL):
+
+```bash
+# From either side
+weaseltree attach
+```
+
+This detaches the WSL worktree and checks out the branch on Windows, so you can work there with normal git. Run `weaseltree sync` to switch back to WSL-side development.
+
+### Sync flags
+
+If the Windows side has commits that would be lost during sync, you'll be prompted to pull, drop, or abort. For non-interactive use:
+
+```bash
+weaseltree sync --pull   # cherry-pick Windows commits to WSL branch first
+weaseltree sync --drop   # discard Windows commits and sync
+```
+
 ### Switching Branches
 
 To switch to a different branch:

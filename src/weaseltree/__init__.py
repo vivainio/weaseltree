@@ -880,6 +880,72 @@ def up_command(args):
         print(f"Deleted {deleted} file(s)")
 
 
+def attach_command(args):
+    """Detach WSL side and put Windows side on the real branch."""
+    cwd = get_git_toplevel() or os.getcwd()
+
+    # Try Windows side first (/mnt/c/...)
+    relative_path = extract_relative_path(cwd)
+    if relative_path is not None:
+        config = load_worktree_config(relative_path)
+        if config is None:
+            print(f"Error: No config found for {relative_path}", file=sys.stderr)
+            sys.exit(1)
+        windows_path = cwd
+        wsl_path = config.get("wsl_path")
+        branch = config["branch"]
+    else:
+        # Try WSL side (lookup by wsl_path)
+        result = find_config_by_wsl_path(cwd)
+        if result is None:
+            print(f"Error: Not a weaseltree-managed path: {cwd}", file=sys.stderr)
+            sys.exit(1)
+        _, config = result
+        windows_path = config["windows_path"]
+        wsl_path = cwd
+        branch = config["branch"]
+
+    # Detach WSL side first
+    if wsl_path and Path(wsl_path).exists():
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=wsl_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            commit_sha = result.stdout.strip()
+            head_path = Path(wsl_path) / ".git"
+            # In a worktree, .git is a file; find the real HEAD location
+            if head_path.is_file():
+                content = head_path.read_text().strip()
+                if content.startswith("gitdir: "):
+                    gitdir = content[8:]
+                    head_file = Path(gitdir) / "HEAD"
+                else:
+                    head_file = head_path
+            else:
+                head_file = head_path / "HEAD"
+            head_file.write_text(commit_sha + "\n")
+            print(f"Detached WSL side")
+        except Exception as e:
+            print(f"Error detaching WSL side: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Attach Windows side to the branch
+    try:
+        subprocess.run(
+            ["git.exe", "checkout", branch],
+            cwd=windows_path,
+            check=True,
+        )
+        print(f"Windows side now on branch '{branch}'")
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def list_command(args):
     """List all weaseltree-managed directories."""
     config = load_config()
@@ -944,6 +1010,7 @@ def show_status():
     print("  push   Push the WSL branch to origin")
     print("  pull   Fetch from origin and update the branch")
     print("  list   List all managed directories")
+    print("  attach Put Windows side back on real branch")
     print("  run    Run a command on the Windows side")
     print()
 
@@ -1049,6 +1116,12 @@ def main():
         "list", help="List all managed directories"
     )
     list_parser.set_defaults(func=list_command)
+
+    # attach subcommand
+    attach_parser = subparsers.add_parser(
+        "attach", help="Put Windows side back on real branch"
+    )
+    attach_parser.set_defaults(func=attach_command)
 
     # run subcommand
     run_parser = subparsers.add_parser(
