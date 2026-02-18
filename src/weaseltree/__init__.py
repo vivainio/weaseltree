@@ -902,26 +902,32 @@ def run_command(args):
         print("Usage: weaseltree run <command> [args...]", file=sys.stderr)
         sys.exit(1)
 
-    cwd = get_git_toplevel() or os.getcwd()
+    actual_cwd = os.getcwd()
+    toplevel = get_git_toplevel() or actual_cwd
 
     # Try Windows side first (/mnt/c/...)
-    relative_path = extract_relative_path(cwd)
+    relative_path = extract_relative_path(toplevel)
     if relative_path is not None:
         config = load_worktree_config(relative_path)
         if config:
             windows_path = config["windows_path"]
         else:
-            windows_path = cwd
+            windows_path = toplevel
     else:
         # Try WSL side (lookup by wsl_path)
-        result = find_config_by_wsl_path(cwd)
+        result = find_config_by_wsl_path(toplevel)
         if result is not None:
             _, config = result
             windows_path = config["windows_path"]
         else:
-            print(f"Error: Not a weaseltree-managed path: {cwd}", file=sys.stderr)
+            print(f"Error: Not a weaseltree-managed path: {toplevel}", file=sys.stderr)
             print("Run 'weaseltree clone' first to set up the mapping.", file=sys.stderr)
             sys.exit(1)
+
+    # Preserve subdirectory offset
+    subdir = os.path.relpath(actual_cwd, toplevel)
+    if subdir != ".":
+        windows_path = str(Path(windows_path) / subdir)
 
     result = subprocess.run(["cmd.exe", "/c"] + args.cmd, cwd=windows_path)
     sys.exit(result.returncode)
