@@ -213,9 +213,9 @@ def check_windows_ahead(windows_path: str, wsl_path: str | None, branch: str,
         response = "d"
     else:
         if wsl_path and Path(wsl_path).exists():
-            prompt = "[p]ull to WSL branch / [d]rop / [a]bort? "
+            prompt = "[p]ull to WSL branch / [d]rop / [a]bort? (use --pull or --drop to skip) "
         else:
-            prompt = "[d]rop / [a]bort? "
+            prompt = "[d]rop / [a]bort? (use --drop to skip) "
         try:
             response = input(prompt).strip().lower()
         except EOFError:
