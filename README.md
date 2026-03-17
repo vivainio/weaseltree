@@ -1,6 +1,6 @@
 # weaseltree
 
-Sync git worktrees between fast WSL filesystem and slow Windows filesystem.
+Sync git repos between fast WSL filesystem and slow Windows filesystem.
 
 ## Problem
 
@@ -8,7 +8,7 @@ All filesystem operations from WSL on Windows drives (`/mnt/c/...`) are slow due
 
 AI coding tools like Claude Code also benefit significantly from fast filesystem access - file searches, code analysis, and edits are all much faster on native WSL paths.
 
-This tool uses [git worktree](https://git-scm.com/docs/git-worktree) to create a linked working tree on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for Windows-native tools.
+This tool creates a full clone on the native WSL filesystem for fast development, while keeping a synchronized copy on Windows for Windows-native tools. The WSL clone has a `win` remote pointing to the Windows repo, enabling simple `git push`/`git fetch` based sync.
 
 ## Install
 
@@ -18,36 +18,37 @@ pip install -e .
 
 ## Usage
 
-### Clone (from Windows side)
+### Link (from WSL side)
 
-Navigate to your Windows repository (under `/mnt/c/...`) and run:
+You have two repos cloned independently (from the real remote). Link them:
 
 ```bash
-cd /mnt/c/r/myproject
-weaseltree clone
+cd ~/r/myproject
+weaseltree link /mnt/c/r/myproject
 ```
 
 This will:
-1. Detach HEAD on the Windows side
-2. Create a worktree at `~/r/myproject` on the same branch
-3. Save the config to `~/.weaseltree` (Windows home)
-
-You can specify a custom target directory instead of mirroring the path:
-
-```bash
-weaseltree clone ~/projects/myproject
-```
+1. Add a `win` remote on the WSL repo pointing to the Windows repo
+2. Detach HEAD on the Windows side
+3. Save the config to `~/.weaseltree.json` (Windows home)
 
 ### Sync
 
-Update the Windows side to the latest commit on the branch:
+Push WSL commits to the Windows side:
 
 ```bash
 # From either side
 weaseltree sync
 ```
 
-Run this after making commits on the WSL side to update the Windows worktree. Uses `git.exe` so Windows-side git settings (like `core.autocrlf`) are honored.
+Run this after making commits on the WSL side. Uses `git push win` to transfer commits, then `git.exe checkout` so Windows-side git settings (like `core.autocrlf`) are honored.
+
+If the Windows side has commits that aren't on the WSL branch, you'll be prompted to merge, drop, or abort:
+
+```bash
+weaseltree sync --pull   # merge Windows commits into WSL branch first
+weaseltree sync --drop   # force-push, discarding Windows-only commits
+```
 
 ### Up
 
@@ -58,7 +59,7 @@ Copy uncommitted changes from WSL to Windows (without committing):
 weaseltree up
 ```
 
-This copies all modified, added, and untracked files to the Windows worktree. Useful when you need Windows tools to see uncommitted changes.
+This copies all modified, added, and untracked files to the Windows repo. Useful when you need Windows tools to see uncommitted changes.
 
 ### Push
 
@@ -69,7 +70,7 @@ Push the branch to origin:
 weaseltree push
 ```
 
-Uses `git.exe` when run from WSL, so Windows-side git remotes and credentials are used.
+Syncs WSL -> Windows first, then uses `git.exe push` so Windows-side git remotes and credentials are used.
 
 ### Pull
 
@@ -80,34 +81,25 @@ Fetch from origin and update the branch:
 weaseltree pull
 ```
 
-Uses `git.exe` for fetch (Windows credentials), then fast-forward merges into the WSL worktree.
+Uses `git.exe` for fetch (Windows credentials), then propagates to the WSL clone via `git fetch win`.
 
 ### Attach
 
-Hand off to the Windows side by putting it back on the real branch (and detaching WSL):
+Hand off to the Windows side by putting it back on the real branch:
 
 ```bash
 # From either side
 weaseltree attach
 ```
 
-This detaches the WSL worktree and checks out the branch on Windows, so you can work there with normal git. Run `weaseltree sync` to switch back to WSL-side development.
-
-### Sync flags
-
-If the Windows side has commits that would be lost during sync, you'll be prompted to pull, drop, or abort. For non-interactive use:
-
-```bash
-weaseltree sync --pull   # cherry-pick Windows commits to WSL branch first
-weaseltree sync --drop   # discard Windows commits and sync
-```
+This checks out the branch on Windows so you can work there with normal git. Run `weaseltree sync` to switch back to WSL-side development.
 
 ### Switching Branches
 
 To switch to a different branch:
 
 ```bash
-# In the WSL worktree
+# In the WSL clone
 git checkout other-branch
 weaseltree sync
 ```
@@ -124,8 +116,8 @@ weaseltree
 
 ## Workflow
 
-1. Start with a repo on Windows: `/mnt/c/r/myproject` on branch `feature-x`
-2. Run `weaseltree clone` to create `~/r/myproject` worktree
+1. Clone the repo on both sides: `git clone <url>` on Windows and WSL
+2. Run `cd ~/r/myproject && weaseltree link /mnt/c/r/myproject`
 3. Work in `~/r/myproject` (fast filesystem - builds, git, everything)
 4. Run `weaseltree up` to copy uncommitted changes to Windows
 5. Run `weaseltree sync` after commits to update Windows side
