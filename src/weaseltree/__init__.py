@@ -310,8 +310,13 @@ def sync_command(args):
         print(f"Error pushing to origin: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Pull on Windows side
+    # Checkout and pull on Windows side
     try:
+        subprocess.run(
+            ["git.exe", "checkout", branch],
+            cwd=windows_path,
+            check=True,
+        )
         subprocess.run(
             ["git.exe", "pull", "--ff-only", "origin", branch],
             cwd=windows_path,
